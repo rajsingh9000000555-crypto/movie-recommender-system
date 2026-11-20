@@ -1,21 +1,13 @@
 import ast
-import os
 from pathlib import Path
 
 import pandas as pd
-import requests
 import streamlit as st
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 DATA_FILE = Path(__file__).with_name("tmdb_5000_movies.csv")
-
-
-def get_tmdb_api_key():
-    try:
-        return st.secrets["TMDB_API_KEY"]
-    except (KeyError, FileNotFoundError):
-        return os.getenv("TMDB_API_KEY")
+CREDITS_FILE = Path(__file__).with_name("tmdb_5000_credits.csv")
 
 
 def _names(value):
@@ -33,6 +25,17 @@ def load_movies():
     text_columns = ["overview", "genres", "keywords"]
     for column in text_columns:
         movies[column] = movies[column].fillna("")
+
+    if CREDITS_FILE.exists():
+        credits = pd.read_csv(CREDITS_FILE)
+        movies = movies.merge(
+            credits.rename(columns={"movie_id": "credits_movie_id"}),
+            on="title",
+            how="left",
+        )
+    else:
+        movies["cast"] = ""
+
     movies["tags"] = (
         movies["overview"]
         + " "
@@ -45,19 +48,30 @@ def load_movies():
     return movies, similarity
 
 
-@st.cache_data
-def fetch_poster(movie_id):
-    api_key = get_tmdb_api_key()
-    if not api_key:
-        return None
-    url = (
-        f"https://api.themoviedb.org/3/movie/{movie_id}"
-        f"?api_key={api_key}&language=en-US"
-    )
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    poster_path = response.json().get("poster_path")
-    return f"https://image.tmdb.org/t/p/w500/{poster_path}" if poster_path else None
+def parse_names(value, limit=None):
+    if not isinstance(value, str) or not value:
+        return []
+    try:
+        names = [
+            item["name"]
+            for item in ast.literal_eval(value)
+            if isinstance(item, dict) and item.get("name")
+        ]
+    except (ValueError, SyntaxError, TypeError):
+        return []
+    return names if limit is None else names[:limit]
+
+
+def get_movie_details(movie):
+    genres = parse_names(movie["genres"])
+    cast = parse_names(movie.get("cast"), limit=4)
+
+    release_date = movie.get("release_date")
+    release_year = ""
+    if isinstance(release_date, str) and len(release_date) >= 4:
+        release_year = release_date[:4]
+
+    return genres, cast, release_year
 
 
 def recommend(movie, movies, similarity):
@@ -70,13 +84,8 @@ def recommend(movie, movies, similarity):
     )
     recommendations = movies.iloc[[item[0] for item in distances[1:6]]]
     names = recommendations["title"].tolist()
-    posters = []
-    for movie_id in recommendations["id"]:
-        try:
-            posters.append(fetch_poster(movie_id))
-        except requests.RequestException:
-            posters.append(None)
-    return names, posters
+    details = [get_movie_details(movie) for _, movie in recommendations.iterrows()]
+    return names, details
 
 
 st.set_page_config(
@@ -116,17 +125,21 @@ st.markdown(
         border-radius: 16px;
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
     }
-    [data-testid="stImage"] img {
-        border-radius: 12px;
-        min-height: 260px;
-        object-fit: cover;
-    }
     .movie-title {
         min-height: 58px;
         color: #ffffff;
         font-weight: 700;
         font-size: 1.05rem;
         line-height: 1.35;
+    }
+    .movie-meta {
+        color: #cdd2e8;
+        min-height: 92px;
+        font-size: 0.92rem;
+        line-height: 1.55;
+    }
+    .movie-meta strong {
+        color: #ffffff;
     }
     div.stButton > button {
         border-radius: 999px;
@@ -162,34 +175,36 @@ with st.container(border=True):
     find = st.button("Find similar movies", type="primary", use_container_width=True)
 
 if find:
-    recommended_movie_names, recommended_movie_posters = recommend(
+    recommended_movie_names, recommended_movie_details = recommend(
         selected_movie, movies, similarity
     )
     st.session_state.recommended_movie_names = recommended_movie_names
-    st.session_state.recommended_movie_posters = recommended_movie_posters
+    st.session_state.recommended_movie_details = recommended_movie_details
 
 if "recommended_movie_names" in st.session_state:
     st.subheader("Recommended for you")
     st.caption(f"Similar to {selected_movie}")
 
     names = st.session_state.recommended_movie_names
-    posters = st.session_state.recommended_movie_posters
+    details = st.session_state.recommended_movie_details
     columns = st.columns(len(names))
-    for column, name, poster in zip(columns, names, posters):
+    for column, name, detail in zip(columns, names, details):
         with column:
             with st.container(border=True):
                 st.markdown(
                     f'<p class="movie-title">{name}</p>',
                     unsafe_allow_html=True,
                 )
-                if poster:
-                    st.image(poster, use_container_width=True)
-                else:
-                    st.markdown(
-                        '<div style="height:260px;display:flex;align-items:center;'
-                        'justify-content:center;background:#24243a;border-radius:12px;'
-                        'color:#b9bfd8;">'
-                        'Poster unavailable</div>',
-                        unsafe_allow_html=True,
-                    )
+                genres, cast, release_year = detail
+                genre_text = ", ".join(genres[:3]) if genres else "Not available"
+                cast_text = ", ".join(cast) if cast else "Not available"
+                year_text = release_year or "Not available"
+                st.markdown(
+                    f'<div class="movie-meta">'
+                    f'<strong>Year</strong><br>{year_text}<br>'
+                    f'<strong>Genres</strong><br>{genre_text}<br>'
+                    f'<strong>Cast</strong><br>{cast_text}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 

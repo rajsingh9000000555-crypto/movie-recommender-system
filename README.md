@@ -12,10 +12,8 @@ pip install pandas requests scikit-learn streamlit
 streamlit run app.py
 ```
 
-The app reads `tmdb_5000_movies.csv` directly, so generated pickle files are not
-required. Add these optional secrets in Streamlit Cloud for full features:
-
-- `TMDB_API_KEY` for movie posters
+The app reads `tmdb_5000_movies.csv` and `tmdb_5000_credits.csv` directly, so
+generated pickle files and API keys are not required.
 
 The notebook can be run locally from this directory. The credits CSV is optional;
 without it, recommendations use overview, genre, and keyword data.
