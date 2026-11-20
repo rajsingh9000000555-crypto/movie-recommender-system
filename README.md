@@ -16,8 +16,6 @@ The app reads `tmdb_5000_movies.csv` directly, so generated pickle files are not
 required. Add these optional secrets in Streamlit Cloud for full features:
 
 - `TMDB_API_KEY` for movie posters
-- `OPENAI_API_KEY` for the ChatGPT assistant
-- `OPENAI_MODEL` optionally defaults to `gpt-4o-mini`
 
 The notebook can be run locally from this directory. The credits CSV is optional;
 without it, recommendations use overview, genre, and keyword data.
